@@ -36,6 +36,14 @@ def _prep_body(body: QuestionnaireCreate | QuestionnaireUpdate, user: dict) -> d
     return doc
 
 
+def _can_modify(doc: dict, current_user: dict) -> bool:
+    """Cek apakah user boleh memodifikasi/menghapus kuesioner ini."""
+    roles = current_user.get("roles", [])
+    if "super_admin" in roles or "admin" in roles:
+        return True
+    return str(doc.get("user_id")) == str(current_user["_id"])
+
+
 @router.get("")
 async def list_questionnaires(
     dusun: str | None = Query(None),
@@ -107,11 +115,8 @@ async def get_questionnaire(
     if not doc:
         raise HTTPException(status_code=404, detail="Kuesioner tidak ditemukan")
 
-    # Cek akses
-    roles = current_user.get("roles", [])
-    if "super_admin" not in roles and "admin" not in roles:
-        if str(doc.get("user_id")) != str(current_user["_id"]):
-            raise HTTPException(status_code=403, detail="Akses ditolak")
+    if not _can_modify(doc, current_user):
+        raise HTTPException(status_code=403, detail="Akses ditolak")
 
     return serialize_doc(doc)
 
@@ -128,10 +133,8 @@ async def update_questionnaire(
     if not existing:
         raise HTTPException(status_code=404, detail="Kuesioner tidak ditemukan")
 
-    roles = current_user.get("roles", [])
-    if "super_admin" not in roles and "admin" not in roles:
-        if str(existing.get("user_id")) != str(current_user["_id"]):
-            raise HTTPException(status_code=403, detail="Akses ditolak")
+    if not _can_modify(existing, current_user):
+        raise HTTPException(status_code=403, detail="Akses ditolak")
 
     doc = _prep_body(body, current_user)
     doc["updated_at"] = datetime.now(timezone.utc)
@@ -153,10 +156,11 @@ async def delete_questionnaire(
     if not existing:
         raise HTTPException(status_code=404, detail="Kuesioner tidak ditemukan")
 
-    roles = current_user.get("roles", [])
-    if "super_admin" not in roles and "admin" not in roles:
-        if str(existing.get("user_id")) != str(current_user["_id"]):
-            raise HTTPException(status_code=403, detail="Akses ditolak")
+    if not _can_modify(existing, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="Akses ditolak. Anda hanya bisa menghapus data milik Anda sendiri.",
+        )
 
     await db["questionnaires"].delete_one({"_id": oid})
-    return {"message": "Kuesioner berhasil dihapus"}
+    return {"message": "Kuesioner berhasil dihapus", "id": q_id}
