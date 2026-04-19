@@ -4,13 +4,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from .core.config import settings
-from .core.database import connect_db, close_db
-from .routers import auth, surveys, questionnaires, statistics, users
+from .core.database import connect_db, close_db, get_db
+from .core.startup import auto_setup
+from .routers import auth, surveys, questionnaires, statistics, users, setup
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_db()
+    db = get_db()
+    await auto_setup(db)   # ← migrate + seed otomatis jika db kosong
     yield
     await close_db()
 
@@ -25,10 +28,9 @@ app = FastAPI(
 )
 
 # ─── CORS ────────────────────────────────────────────────────────────────────
-origins = settings.origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if "*" in origins else origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -40,9 +42,9 @@ app.include_router(surveys.router)
 app.include_router(questionnaires.router)
 app.include_router(statistics.router)
 app.include_router(users.router)
+app.include_router(setup.router)
 
 
-# ─── Health check ─────────────────────────────────────────────────────────────
 @app.get("/", tags=["Health"])
 async def root():
     return {
