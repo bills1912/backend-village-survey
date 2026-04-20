@@ -6,14 +6,14 @@ from contextlib import asynccontextmanager
 from .core.config import settings
 from .core.database import connect_db, close_db, get_db
 from .core.startup import auto_setup
-from .routers import auth, surveys, questionnaires, statistics, users, setup
+from .routers import auth, surveys, questionnaires, statistics, users, setup, permissions
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_db()
     db = get_db()
-    await auto_setup(db)   # ← migrate + seed otomatis jika db kosong
+    await auto_setup(db)
     yield
     await close_db()
 
@@ -43,6 +43,7 @@ app.include_router(questionnaires.router)
 app.include_router(statistics.router)
 app.include_router(users.router)
 app.include_router(setup.router)
+app.include_router(permissions.router)
 
 
 @app.get("/", tags=["Health"])
