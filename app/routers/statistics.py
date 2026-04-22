@@ -7,15 +7,6 @@ from ..core.deps import get_current_user
 
 router = APIRouter(prefix="/api/statistics", tags=["Statistics"])
 
-DUSUN_LABELS = {
-    "1": "Dusun I-A",
-    "2": "Dusun I-B",
-    "3": "Dusun II Timur",
-    "4": "Dusun II Barat",
-    "5": "Dusun III",
-    "6": "Dusun IV",
-}
-
 PDK_LABELS = {
     "1": "Tidak Sekolah/Belum Tamat SD",
     "2": "SD/Sederajat",
@@ -28,62 +19,95 @@ PDK_LABELS = {
 
 @router.get("")
 async def get_statistics(
-    dusun: str | None = Query(None),
-    survey_id: str | None = Query(None),
+    # ── Filter hierarki wilayah (semua opsional, tapi biasanya diisi bertingkat) ──
+    kode_provinsi:  str | None = Query(None, description="Filter by kode provinsi"),
+    kode_kabupaten: str | None = Query(None, description="Filter by kode kabupaten/kota"),
+    kode_kecamatan: str | None = Query(None, description="Filter by kode kecamatan"),
+    kode_desa:      str | None = Query(None, description="Filter by kode desa (paling spesifik)"),
+    # ── Sub-filter dusun (teks, opsional) ──────────────────────────────────────
+    dusun:          str | None = Query(None, description="Filter by nama dusun (partial match)"),
+    # ── Filter survey ──────────────────────────────────────────────────────────
+    survey_id:      str | None = Query(None),
     db: AsyncIOMotorDatabase = Depends(get_db),
     _: dict = Depends(get_current_user),
 ):
+    """
+    Statistik kuesioner dengan filter hierarki wilayah bertingkat.
+
+    Urutan filter yang direkomendasikan (dari luar ke dalam):
+      kode_provinsi → kode_kabupaten → kode_kecamatan → kode_desa
+
+    Filter lebih spesifik (dalam) otomatis mengabaikan filter lebih luar.
+    Contoh: jika kode_desa diisi, kode_provinsi/kab/kec diabaikan oleh MongoDB
+    karena index kode_desa sudah cukup.
+    """
     filt: dict = {}
+
+    # Gunakan filter paling spesifik yang tersedia
+    if kode_desa:
+        filt["kode_desa"] = kode_desa
+    elif kode_kecamatan:
+        filt["kode_kecamatan"] = kode_kecamatan
+    elif kode_kabupaten:
+        filt["kode_kabupaten"] = kode_kabupaten
+    elif kode_provinsi:
+        filt["kode_provinsi"] = kode_provinsi
+
     if dusun:
-        filt["dusun"] = dusun
+        filt["dusun"] = {"$regex": dusun, "$options": "i"}
+
     if survey_id:
         try:
             filt["survey_id"] = ObjectId(survey_id)
         except Exception:
             pass
 
-    # Ambil semua kuesioner yang sesuai filter
-    docs = await db["questionnaires"].find(filt).to_list(length=10000)
+    docs = await db["questionnaires"].find(filt).to_list(length=100_000)
 
-    # ── Hitung semua metrik ──────────────────────────────────────────────────
+    # ── Aggregasi ──────────────────────────────────────────────────────────────
     total_kk = len(docs)
     total_jiwa = 0
     total_laki = 0
     total_perempuan = 0
 
-    per_dusun: dict[str, int] = {}
-    per_petugas: dict[str, int] = {}
-    per_status_kk: dict[str, int] = {}
-    per_pendidikan: dict[str, int] = {}
-    per_pekerjaan: dict[str, int] = {}
-    per_status_kawin: dict[str, int] = {}
-    per_kewarganegaraan: dict[str, int] = {}
-    per_keberadaan: dict[str, int] = {}
-    per_disabilitas: dict[str, int] = {}
-    kelompok_usia: dict[str, int] = {}
+    # Distribusi wilayah
+    per_provinsi:  dict[str, int] = {}
+    per_kabupaten: dict[str, int] = {}
+    per_kecamatan: dict[str, int] = {}
+    per_desa:      dict[str, int] = {}
+    per_dusun:     dict[str, int] = {}
+
+    per_petugas:          dict[str, int] = {}
+    per_status_kk:        dict[str, int] = {}
+    per_pendidikan:       dict[str, int] = {}
+    per_pekerjaan:        dict[str, int] = {}
+    per_status_kawin:     dict[str, int] = {}
+    per_kewarganegaraan:  dict[str, int] = {}
+    per_keberadaan:       dict[str, int] = {}
+    per_disabilitas:      dict[str, int] = {}
+    kelompok_usia:        dict[str, int] = {}
 
     for q in docs:
-        # Dusun
-        dl = DUSUN_LABELS.get(q.get("dusun", ""), f"Dusun {q.get('dusun', '?')}")
-        per_dusun[dl] = per_dusun.get(dl, 0) + 1
+        # Wilayah
+        def _inc(d: dict, key: str | None):
+            if key:
+                d[key] = d.get(key, 0) + 1
 
-        # Petugas
-        petugas = q.get("nama_petugas", "Tidak Diketahui")
-        per_petugas[petugas] = per_petugas.get(petugas, 0) + 1
+        _inc(per_provinsi,  q.get("nama_provinsi"))
+        _inc(per_kabupaten, q.get("nama_kabupaten"))
+        _inc(per_kecamatan, q.get("nama_kecamatan"))
+        _inc(per_desa,      q.get("nama_desa"))
+        _inc(per_dusun,     q.get("dusun"))
 
-        # Status KK
-        sk = q.get("r_103")
-        if sk:
-            per_status_kk[sk] = per_status_kk.get(sk, 0) + 1
+        # Petugas & status KK
+        _inc(per_petugas,   q.get("nama_petugas"))
+        _inc(per_status_kk, q.get("r_103"))
 
-        # Anggota keluarga
         for a in q.get("r_200", []):
             total_jiwa += 1
             jk = a.get("r_205")
-            if jk == "1":
-                total_laki += 1
-            elif jk == "2":
-                total_perempuan += 1
+            if jk == "1": total_laki += 1
+            elif jk == "2": total_perempuan += 1
 
             # Pendidikan
             pdk = a.get("r_212")
@@ -96,14 +120,13 @@ async def get_statistics(
             if pkj:
                 pkj_label = (
                     "Masih Bersekolah" if pkj == "1"
-                    else "Sudah Bekerja" if pkj == "2"
+                    else "Sudah Bekerja"  if pkj == "2"
                     else "Tidak Bekerja"
                 )
                 per_pekerjaan[pkj_label] = per_pekerjaan.get(pkj_label, 0) + 1
 
             # Status kawin
-            kawin_map = {"1": "Kawin", "2": "Belum Kawin",
-                         "3": "Cerai Hidup", "4": "Cerai Mati"}
+            kawin_map = {"1": "Kawin", "2": "Belum Kawin", "3": "Cerai Hidup", "4": "Cerai Mati"}
             kw = a.get("r_204")
             if kw:
                 kl = kawin_map.get(kw, kw)
@@ -116,8 +139,7 @@ async def get_statistics(
                 per_kewarganegaraan[wl] = per_kewarganegaraan.get(wl, 0) + 1
 
             # Keberadaan
-            kb_map = {"1": "Berdomisili", "2": "Sudah Pindah",
-                      "3": "KK Baru", "4": "Meninggal"}
+            kb_map = {"1": "Berdomisili", "2": "Sudah Pindah", "3": "KK Baru", "4": "Meninggal"}
             kb = a.get("r_210")
             if kb:
                 kbl = kb_map.get(kb, kb)
@@ -131,37 +153,48 @@ async def get_statistics(
                 "7": "Komunikasi", "8": "Perilaku/Emosi",
             }
             for code in (a.get("r_211") or []):
-                dl2 = disab_map.get(code, code)
-                per_disabilitas[dl2] = per_disabilitas.get(dl2, 0) + 1
+                dl = disab_map.get(code, code)
+                per_disabilitas[dl] = per_disabilitas.get(dl, 0) + 1
 
             # Kelompok usia
             usia = a.get("r_207_usia")
             if usia is not None:
                 try:
                     u = int(usia)
-                    if u < 5:        bucket = "0-4"
-                    elif u < 15:     bucket = "5-14"
-                    elif u < 25:     bucket = "15-24"
-                    elif u < 40:     bucket = "25-39"
-                    elif u < 60:     bucket = "40-59"
-                    else:            bucket = "60+"
+                    bucket = (
+                        "0-4"   if u <  5 else
+                        "5-14"  if u < 15 else
+                        "15-24" if u < 25 else
+                        "25-39" if u < 40 else
+                        "40-59" if u < 60 else
+                        "60+"
+                    )
                     kelompok_usia[bucket] = kelompok_usia.get(bucket, 0) + 1
                 except (ValueError, TypeError):
                     pass
 
     return {
-        "total_kk": total_kk,
-        "total_jiwa": total_jiwa,
+        # Ringkasan
+        "total_kk":        total_kk,
+        "total_jiwa":      total_jiwa,
         "total_laki_laki": total_laki,
         "total_perempuan": total_perempuan,
-        "per_dusun": per_dusun,
-        "per_petugas": per_petugas,
-        "per_status_kk": per_status_kk,
-        "per_pendidikan": per_pendidikan,
-        "per_pekerjaan": per_pekerjaan,
-        "per_status_kawin": per_status_kawin,
+
+        # Distribusi wilayah bertingkat
+        "per_provinsi":    per_provinsi,
+        "per_kabupaten":   per_kabupaten,
+        "per_kecamatan":   per_kecamatan,
+        "per_desa":        per_desa,
+        "per_dusun":       per_dusun,
+
+        # Lainnya
+        "per_petugas":         per_petugas,
+        "per_status_kk":       per_status_kk,
+        "per_pendidikan":      per_pendidikan,
+        "per_pekerjaan":       per_pekerjaan,
+        "per_status_kawin":    per_status_kawin,
         "per_kewarganegaraan": per_kewarganegaraan,
-        "per_keberadaan": per_keberadaan,
-        "per_disabilitas": per_disabilitas,
-        "kelompok_usia": kelompok_usia,
+        "per_keberadaan":      per_keberadaan,
+        "per_disabilitas":     per_disabilitas,
+        "kelompok_usia":       kelompok_usia,
     }

@@ -1,10 +1,10 @@
 # app/schemas/__init__.py
-# ─── Auth Schemas ─────────────────────────────────────────────────────────────
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List, Any
 from datetime import datetime
 
 
+# ─── Auth Schemas ─────────────────────────────────────────────────────────────
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
@@ -47,6 +47,12 @@ class SurveyUpdate(BaseModel):
     nama_survey: Optional[str] = None
 
 
+# ─── Wilayah Schemas ──────────────────────────────────────────────────────────
+class WilayahItem(BaseModel):
+    kode: str
+    nama: str
+
+
 # ─── Questionnaire Schemas ────────────────────────────────────────────────────
 class AnggotaKeluargaSchema(BaseModel):
     r_201: Optional[str] = None   # Nama
@@ -70,12 +76,26 @@ class AnggotaKeluargaSchema(BaseModel):
 class QuestionnaireCreate(BaseModel):
     survey_id: Optional[Any] = None
     nama_petugas: str
+
+    # ── Wilayah (baru) ────────────────────────────────────────────────────────
+    kode_provinsi: Optional[str] = None
+    nama_provinsi: Optional[str] = None
+    kode_kabupaten: Optional[str] = None
+    nama_kabupaten: Optional[str] = None
+    kode_kecamatan: Optional[str] = None
+    nama_kecamatan: Optional[str] = None
+    kode_desa: Optional[str] = None
+    nama_desa: Optional[str] = None
+
+    # ── Dusun (opsional, teks bebas) ─────────────────────────────────────────
+    dusun: Optional[str] = None          # teks bebas, opsional
+
     kelompok_dasa_wisma: Optional[str] = None
     lokasi_rumah: Optional[dict] = None
     waktu_pendataan: Optional[str] = None
-    dusun: str
+
     r_102: str                              # No. KK
-    r_103: Optional[str] = None            # Status KK
+    r_103: Optional[str] = None            # Status KK (label mengikuti nama_desa)
     r_104: Optional[str] = None
     r_200: List[AnggotaKeluargaSchema] = []
     r_401: Optional[str] = None

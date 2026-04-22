@@ -33,11 +33,15 @@ def _prep_body(body: QuestionnaireCreate | QuestionnaireUpdate, user: dict) -> d
     # Tambah metadata
     doc["nama_petugas"] = doc.get("nama_petugas") or user.get("name", "")
     doc["user_id"] = user["_id"]
+
+    # Normalisasi dusun: None / string kosong → None
+    if not doc.get("dusun"):
+        doc["dusun"] = None
+
     return doc
 
 
 def _can_modify(doc: dict, current_user: dict) -> bool:
-    """Cek apakah user boleh memodifikasi/menghapus kuesioner ini."""
     roles = current_user.get("roles", [])
     if "super_admin" in roles or "admin" in roles:
         return True
@@ -46,7 +50,15 @@ def _can_modify(doc: dict, current_user: dict) -> bool:
 
 @router.get("")
 async def list_questionnaires(
+    # ── Wilayah filters (baru) ──────────────────────────────────────────────
+    kode_provinsi: str | None = Query(None),
+    kode_kabupaten: str | None = Query(None),
+    kode_kecamatan: str | None = Query(None),
+    kode_desa: str | None = Query(None),
+    nama_desa: str | None = Query(None),
+    # ── Dusun sub-filter (opsional, text-match) ─────────────────────────────
     dusun: str | None = Query(None),
+    # ── Legacy / existing filters ────────────────────────────────────────────
     survey_id: str | None = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
@@ -60,8 +72,22 @@ async def list_questionnaires(
     if "super_admin" not in roles and "admin" not in roles:
         filt["user_id"] = current_user["_id"]
 
+    # Wilayah filters
+    if kode_provinsi:
+        filt["kode_provinsi"] = kode_provinsi
+    if kode_kabupaten:
+        filt["kode_kabupaten"] = kode_kabupaten
+    if kode_kecamatan:
+        filt["kode_kecamatan"] = kode_kecamatan
+    if kode_desa:
+        filt["kode_desa"] = kode_desa
+    elif nama_desa:
+        filt["nama_desa"] = {"$regex": nama_desa, "$options": "i"}
+
+    # Dusun sub-filter
     if dusun:
-        filt["dusun"] = dusun
+        filt["dusun"] = {"$regex": dusun, "$options": "i"}
+
     if survey_id:
         try:
             filt["survey_id"] = ObjectId(survey_id)

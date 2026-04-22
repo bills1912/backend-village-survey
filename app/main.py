@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from .core.config import settings
 from .core.database import connect_db, close_db, get_db
 from .core.startup import auto_setup
-from .routers import auth, surveys, questionnaires, statistics, users, setup, permissions
+from .routers import auth, surveys, questionnaires, statistics, users, setup, permissions, wilayah
 
 
 @asynccontextmanager
@@ -21,13 +21,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="Backend API untuk Aplikasi Pendataan Desa Suka Makmur",
+    description="Backend API untuk Aplikasi Pendataan Multi-Desa",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
 )
 
-# ─── CORS ────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -36,7 +35,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── Routers ─────────────────────────────────────────────────────────────────
 app.include_router(auth.router)
 app.include_router(surveys.router)
 app.include_router(questionnaires.router)
@@ -44,6 +42,7 @@ app.include_router(statistics.router)
 app.include_router(users.router)
 app.include_router(setup.router)
 app.include_router(permissions.router)
+app.include_router(wilayah.router)          # ← baru
 
 
 @app.get("/", tags=["Health"])
